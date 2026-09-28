@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run log</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Condensed:wght@600;700&display=swap">
+<style>
+  :root {
+    --bg: #edf1f4; --panel: #ffffff; --ink: #10233a; --muted: #5b6b7b;
+    --line: #d3dbe2; --accent: #0f7b5f; --danger: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 400 16px/1.5 "Barlow", system-ui, sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1, .num { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 700; }
+  h1 { font-size: 44px; line-height: 1; margin: 0 0 24px; }
+  h2 { font-size: 18px; margin: 32px 0 8px; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 3px solid var(--accent); background: var(--panel); }
+  .stats div { padding: 14px 16px; border-right: 1px solid var(--line); }
+  .stats div:last-child { border-right: 0; }
+  .num { font-size: 36px; line-height: 1.1; display: block; }
+  .stats span.label { color: var(--muted); font-size: 14px; }
+
+  form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; background: var(--panel); padding: 16px; margin-top: 16px; }
+  label { display: flex; flex-direction: column; font-size: 14px; color: var(--muted); gap: 4px; }
+  .wide { grid-column: 1 / -1; }
+  input { font: inherit; color: var(--ink); padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  button { font: 500 16px "Barlow", sans-serif; cursor: pointer; border-radius: 4px; }
+  .save { grid-column: 1 / -1; background: var(--accent); color: #fff; border: 0; padding: 10px; }
+  :focus-visible { outline: 3px solid #f2b705; outline-offset: 2px; }
+  #error { grid-column: 1 / -1; color: var(--danger); margin: 0; min-height: 1.5em; }
+
+  ul { list-style: none; margin: 0; padding: 0; background: var(--panel); }
+  li { display: grid; grid-template-columns: 96px 1fr auto; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  li:last-child { border-bottom: 0; }
+  .date { color: var(--muted); font-size: 14px; }
+  .detail b { font-weight: 500; }
+  .note { color: var(--muted); font-size: 14px; }
+  .del { background: none; border: 1px solid var(--line); color: var(--muted); padding: 4px 10px; font-size: 14px; }
+  .del:hover { color: var(--danger); border-color: var(--danger); }
+  .empty { padding: 24px 16px; color: var(--muted); }
+
+  @media (max-width: 560px) {
+    form { grid-template-columns: 1fr 1fr; }
+    li { grid-template-columns: 1fr auto; }
+    .date { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Run log</h1>
+
+  <section class="stats" aria-label="Totals">
+    <div><span class="num" id="total">0</span><span class="label">km total</span></div>
+    <div><span class="num" id="count">0</span><span class="label">runs</span></div>
+    <div><span class="num" id="pace">–</span><span class="label">avg pace per km</span></div>
+  </section>
+
+  <h2>Log a run</h2>
+  <form id="form">
+    <label>Date <input type="date" id="run_date" required></label>
+    <label>Distance (km) <input type="number" id="distance_km" step="0.01" min="0.01" required></label>
+    <label>Time (minutes) <input type="number" id="minutes" step="0.1" min="0.1" required></label>
+    <label class="wide">Note <input type="text" id="note" maxlength="200" placeholder="Route, weather, how it felt"></label>
+    <p id="error" role="alert"></p>
+    <button class="save" type="submit">Save run</button>
+  </form>
+
+  <h2>Past runs</h2>
+  <ul id="list"></ul>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  $("run_date").valueAsDate = new Date();
+
+  const fmtPace = (minutesPerKm) => {
+    const m = Math.floor(minutesPerKm);
+    const s = Math.round((minutesPerKm - m) * 60);
+    return s === 60 ? `${m + 1}:00` : `${m}:${String(s).padStart(2, "0")}`;
+  };
+
+  async function load() {
+    const runs = await (await fetch("/api/runs")).json();
+    const km = runs.reduce((a, r) => a + r.distance_km, 0);
+    const mins = runs.reduce((a, r) => a + r.minutes, 0);
+    $("total").textContent = km.toFixed(1);
+    $("count").textContent = runs.length;
+    $("pace").textContent = km ? fmtPace(mins / km) : "–";
+
+    const list = $("list");
+    list.innerHTML = "";
+    if (!runs.length) {
+      list.innerHTML = '<li class="empty">No runs yet. Log your first run above.</li>';
+      return;
+    }
+    for (const r of runs) {
+      const li = document.createElement("li");
+      const date = document.createElement("span");
+      date.className = "date"; date.textContent = r.run_date;
+
+      const detail = document.createElement("div");
+      detail.className = "detail";
+      const b = document.createElement("b");
+      b.textContent = `${r.distance_km} km in ${r.minutes} min`;
+      const pace = document.createTextNode(` (${fmtPace(r.minutes / r.distance_km)} /km)`);
+      detail.append(b, pace);
+      if (r.note) {
+        const n = document.createElement("div");
+        n.className = "note"; n.textContent = r.note;
+        detail.append(n);
+      }
+
+      const del = document.createElement("button");
+      del.className = "del"; del.textContent = "Delete";
+      del.setAttribute("aria-label", `Delete run from ${r.run_date}`);
+      del.onclick = async () => {
+        await fetch(`/api/runs/${r.id}`, { method: "DELETE" });
+        load();
+      };
+      li.append(date, detail, del);
+      list.append(li);
+    }
+  }
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("error").textContent = "";
+    const res = await fetch("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        run_date: $("run_date").value,
+        distance_km: $("distance_km").value,
+        minutes: $("minutes").value,
+        note: $("note").value,
+      }),
+    });
+    if (!res.ok) {
+      $("error").textContent = (await res.json()).error;
+      return;
+    }
+    $("distance_km").value = ""; $("minutes").value = ""; $("note").value = "";
+    load();
+  });
+
+  load();
+</script>
+</body>
+</html>
